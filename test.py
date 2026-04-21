@@ -10,10 +10,10 @@ body={
     "jsonrpc":"2.0",
     "method":"tools/call",
     "params":{
-        "name":"multiply_tool",
+        "name":"plus_tool",
         "arguments":{
-            "n1":123,
-            "n2":243
+            "n1":100,
+            "n2":200
         }
     },
     "id":1
