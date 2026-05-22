@@ -1,10 +1,24 @@
+import os
 from anthropic import Anthropic
 from anthropic.types import Message
 
-
 class Claude:
     def __init__(self, model: str):
-        self.client = Anthropic()
+        # Agar .env me URL na mile to default OpenRouter ka sahi URL uthaye ga
+        base_url = os.getenv("ANTHROPIC_BASE_URL") or "https://openrouter.ai/api/v1"
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        
+        # Terminal me aap ko saaf dikhega ke connection kahan ja raha hai
+        print(f"[DEBUG] Connecting to OpenRouter via: {base_url}")
+        
+        self.client = Anthropic(
+            base_url=base_url,
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": "http://localhost:3000", # OpenRouter ke liye lazmi hai
+                "X-Title": "MCP Python Client",
+            }
+        )
         self.model = model
 
     def add_user_message(self, messages: list, message):
@@ -42,7 +56,7 @@ class Claude:
     ) -> Message:
         params = {
             "model": self.model,
-            "max_tokens": 8000,
+            "max_tokens": 4000, # OpenRouter ke free models ke liye 4000 zyada safe hai
             "messages": messages,
             "temperature": temperature,
             "stop_sequences": stop_sequences,
