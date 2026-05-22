@@ -1,48 +1,67 @@
 import os
-from anthropic import Anthropic
-from anthropic.types import Message
+import json
+from openai import OpenAI
+
 
 class Claude:
     def __init__(self, model: str):
-        # Agar .env me URL na mile to default OpenRouter ka sahi URL uthaye ga
-        base_url = os.getenv("ANTHROPIC_BASE_URL") or "https://openrouter.ai/api/v1"
+        base_url = os.getenv("ANTHROPIC_BASE_URL") or "https://api.groq.com/openai/v1"
         api_key = os.getenv("ANTHROPIC_API_KEY")
-        
-        # Terminal me aap ko saaf dikhega ke connection kahan ja raha hai
-        print(f"[DEBUG] Connecting to OpenRouter via: {base_url}")
-        
-        self.client = Anthropic(
+
+        print(f"[DEBUG] Connecting to: {base_url}")
+
+        self.client = OpenAI(
             base_url=base_url,
             api_key=api_key,
-            default_headers={
-                "HTTP-Referer": "http://localhost:3000", # OpenRouter ke liye lazmi hai
-                "X-Title": "MCP Python Client",
-            }
         )
         self.model = model
 
     def add_user_message(self, messages: list, message):
-        user_message = {
-            "role": "user",
-            "content": message.content
-            if isinstance(message, Message)
-            else message,
-        }
-        messages.append(user_message)
+        if isinstance(message, list):
+            messages.extend(message)
+        else:
+            if isinstance(message, str):
+                content = message
+            else:
+                content = self._extract_text(message)
+            messages.append({"role": "user", "content": content})
 
     def add_assistant_message(self, messages: list, message):
-        assistant_message = {
-            "role": "assistant",
-            "content": message.content
-            if isinstance(message, Message)
-            else message,
-        }
-        messages.append(assistant_message)
+        if hasattr(message, 'choices'):
+            msg = message.choices[0].message
+            assistant_msg = {"role": "assistant", "content": msg.content or ""}
+            if msg.tool_calls:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        }
+                    }
+                    for tc in msg.tool_calls
+                ]
+            messages.append(assistant_msg)
+        else:
+            content = message if isinstance(message, str) else self._extract_text(message)
+            messages.append({"role": "assistant", "content": content})
 
-    def text_from_message(self, message: Message):
-        return "\n".join(
-            [block.text for block in message.content if block.type == "text"]
-        )
+    def _extract_text(self, message):
+        if hasattr(message, 'choices'):
+            return message.choices[0].message.content or ""
+        if hasattr(message, 'content'):
+            parts = []
+            for block in message.content:
+                if hasattr(block, 'text'):
+                    parts.append(block.text)
+            return "\n".join(parts)
+        return str(message)
+
+    def text_from_message(self, message):
+        if hasattr(message, 'choices'):
+            return message.choices[0].message.content or ""
+        return str(message)
 
     def chat(
         self,
@@ -53,26 +72,36 @@ class Claude:
         tools=None,
         thinking=False,
         thinking_budget=1024,
-    ) -> Message:
-        params = {
-            "model": self.model,
-            "max_tokens": 4000, # OpenRouter ke free models ke liye 4000 zyada safe hai
-            "messages": messages,
-            "temperature": temperature,
-            "stop_sequences": stop_sequences,
-        }
-
-        if thinking:
-            params["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": thinking_budget,
-            }
-
-        if tools:
-            params["tools"] = tools
+    ):
+        all_messages = []
 
         if system:
-            params["system"] = system
+            all_messages.append({"role": "system", "content": system})
 
-        message = self.client.messages.create(**params)
-        return message
+        all_messages.extend(messages)
+
+        params = {
+            "model": self.model,
+            "max_tokens": 4000,
+            "messages": all_messages,
+            "temperature": min(temperature, 2.0),
+        }
+
+        if stop_sequences:
+            params["stop"] = stop_sequences
+
+        if tools:
+            openai_tools = []
+            for tool in tools:
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.get("name"),
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("input_schema", {}),
+                    }
+                })
+            params["tools"] = openai_tools
+
+        response = self.client.chat.completions.create(**params)
+        return response
